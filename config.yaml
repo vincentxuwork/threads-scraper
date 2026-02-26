@@ -1,0 +1,135 @@
+# Threads Scraper 排程設定檔
+
+# ── 追蹤設定 ──────────────────────────────────────────────
+
+# 追蹤特定用戶的最新貼文（Demo：追蹤科技相關帳號）
+users:
+  - username: "hmtwinter"
+    max_posts: 5  # 每次最多抓取幾篇貼文
+  # - username: "natgeo"
+  #   max_posts: 10
+  # - username: "another_user"
+  #   max_posts: 5
+
+# 追蹤特定貼文的新回覆
+threads:
+  # - url: "https://www.threads.net/t/XXXXX"
+  #   check_replies: true
+
+# 關鍵字搜尋（從追蹤的用戶貼文中篩選）- Demo 範例
+keywords:
+  - "AI"
+  - "Claude"
+  - "code"
+  - "agent"
+  - "程式"
+
+# ── 探索模式 ──────────────────────────────────────────────
+# 自動搜尋新的貼文（不限於追蹤的用戶）
+
+explore:
+  # 是否啟用探索模式
+  enabled: true
+
+  # 每次向下滾動次數（每次約 10-15 篇貼文）
+  max_scrolls: 3
+
+  # 說明：
+  # - 抓取 Threads 探索頁面的熱門/推薦貼文
+  # - 會自動過濾關鍵字
+  # - 高互動貼文的作者會被自動發現並追蹤
+
+# ── 排程設定 ──────────────────────────────────────────────
+
+schedule:
+  # 每日執行時間（24小時制）
+  daily_at: "09:00"
+
+  # 或者使用 cron 表達式（進階用法）
+  # cron: "0 9 * * *"  # 每天早上 9:00
+
+# ── 資料庫設定 ──────────────────────────────────────────────
+
+database:
+  path: "threads_data.db"
+
+# ── 通知設定 ──────────────────────────────────────────────
+
+notifications:
+  enabled: false  # Demo：先關閉通知
+
+  # Webhook 設定（支援 Discord, Slack, Telegram, LINE 等）
+  webhooks:
+    # Discord Webhook 範例
+    # - url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+    #   type: "discord"
+    #   name: "Threads 通知"
+
+    # Slack Webhook 範例
+    # - url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    #   type: "slack"
+    #   name: "Threads 通知"
+
+    # Telegram Bot 範例
+    # - url: "YOUR_BOT_TOKEN"  # 從 @BotFather 取得
+    #   type: "telegram"
+    #   name: "Threads 通知"
+    #   chat_id: "YOUR_CHAT_ID"  # 你的 Chat ID 或群組 ID
+
+    # LINE Notify 範例
+    # - url: "YOUR_LINE_NOTIFY_TOKEN"  # 從 LINE Notify 取得
+    #   type: "line"
+    #   name: "Threads 通知"
+
+    # 一般 Webhook 範例（發送 JSON）
+    # - url: "https://your-api.com/webhook"
+    #   type: "generic"
+    #   name: "自訂通知"
+
+  # 通知條件
+  notify_on:
+    new_posts: true      # 新貼文
+    new_replies: true    # 新回覆
+    keyword_match: true  # 關鍵字配對
+
+# ── 自動發現設定 ──────────────────────────────────────────────
+
+discovery:
+  # 是否啟用自動發現優質發文者（Demo：現在開啟）
+  enabled: true
+
+  # 發現條件
+  min_like_count: 50         # 最低平均按讚數（Demo 降低門檻）
+  min_reply_count: 5         # 最低平均回覆數
+  min_posts: 2               # 最少貼文數量
+
+  # 每次最多自動追蹤幾個新用戶
+  max_new_users_per_run: 3
+
+  # 是否自動加入追蹤（若為 false，只會列出但不會自動追蹤）
+  auto_track: true
+
+  # 清理不活躍用戶（超過 N 天未抓取）
+  cleanup_inactive_days: 60
+
+# ── 進階設定 ──────────────────────────────────────────────
+
+advanced:
+  # 是否顯示瀏覽器視窗（除錯用）
+  headless: true
+
+  # 抓取間隔設定（避免被當作機器人）
+  delay_between_requests: 5      # 基本延遲（秒）
+  random_delay: true              # 啟用隨機延遲（更像人類）
+  random_delay_min: 3             # 隨機延遲最小值（秒）
+  random_delay_max: 10            # 隨機延遲最大值（秒）
+
+  # 錯誤處理
+  max_retries: 3                  # 失敗重試次數
+  retry_delay: 30                 # 重試間隔（秒）
+
+  # 請求限制（每小時最多抓取幾個用戶）
+  max_requests_per_hour: 20
+
+  # 去重時間範圍（天），超過此時間的貼文不會重複通知
+  dedup_days: 7

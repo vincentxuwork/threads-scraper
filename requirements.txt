@@ -1,0 +1,4 @@
+playwright>=1.40.0
+jmespath>=1.0.0
+nested-lookup>=0.2.25
+parsel>=1.8.0
