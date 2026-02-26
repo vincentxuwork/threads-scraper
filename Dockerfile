@@ -46,12 +46,17 @@ RUN playwright install chromium
 # 複製所有專案檔案
 COPY . .
 
+# 複製並設定啟動腳本權限
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # 創建資料目錄
 RUN mkdir -p /data
 
 # 設定環境變數
 ENV PYTHONUNBUFFERED=1
 ENV DATABASE_PATH=/data/threads_data.db
+ENV SERVICE_TYPE=scheduler
 
-# 預設執行排程器
-CMD ["python", "run_scheduler.py"]
+# 使用 entrypoint 腳本
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
