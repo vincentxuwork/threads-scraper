@@ -5,14 +5,16 @@
 import time
 import yaml
 import random
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List
 import schedule
 
-from threads_scraper import scrape_thread, scrape_profile, scrape_explore
-from database import ThreadsDatabase
-from notifier import Notifier
-from discovery import UserDiscovery
+from src.core.scraper import scrape_thread, scrape_profile, scrape_explore, scrape_search
+from src.core.database import ThreadsDatabase
+from src.features.notifier import Notifier
+from src.features.discovery import UserDiscovery
+from src.core.config_loader import load_config
 
 
 class ThreadsScheduler:
@@ -20,13 +22,21 @@ class ThreadsScheduler:
         """初始化排程器"""
         print("🚀 初始化 Threads Scraper 排程器...")
 
-        # 載入設定檔
-        with open(config_path, "r", encoding="utf-8") as f:
-            self.config = yaml.safe_load(f)
+        # 載入設定檔（支援環境變數）
+        self.config = load_config(config_path)
 
         # 初始化資料庫
-        db_path = self.config.get("database", {}).get("path", "threads_data.db")
-        self.db = ThreadsDatabase(db_path)
+        # ThreadsDatabase 會自動處理 PostgreSQL (DATABASE_URL) 或 SQLite 回退
+        import os
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            # 使用 PostgreSQL
+            self.db = ThreadsDatabase(db_url)
+        else:
+            # 回退到 SQLite
+            from src.core.database_sqlite import ThreadsDatabase as SQLiteDB
+            db_path = self.config.get("database", {}).get("path", "threads_data.db")
+            self.db = SQLiteDB(db_path)
 
         # 初始化通知器
         notifications = self.config.get("notifications", {})
@@ -186,19 +196,36 @@ class ThreadsScheduler:
                 if explore_data:
                     explore_posts = explore_data.get("explore_posts", [])
                     new_explore_count = 0
+                    skipped_count = 0
 
-                    # 儲存探索貼文
+                    # 儲存探索貼文（只保存符合關鍵字的）
                     for post in explore_posts:
-                        success, is_new = self.db.save_post(post)
-                        if success and is_new:
-                            new_explore_count += 1
+                        # 檢查是否符合關鍵字（使用全詞匹配）
+                        should_save = True
+                        if self.keywords:
+                            text = post.get("text") or ""
+                            has_keyword = False
+                            matched_keywords = []
 
-                            # 如果貼文包含關鍵字，立即標記為未通知
-                            if self.keywords:
-                                text = (post.get("text") or "").lower()
-                                has_keyword = any(kw.lower() in text for kw in self.keywords)
-                                if has_keyword:
-                                    print(f"   🎯 發現關鍵字貼文: @{post.get('username')}")
+                            for kw in self.keywords:
+                                # 使用全詞匹配（\b 表示詞邊界）
+                                pattern = r'\b' + re.escape(kw) + r'\b'
+                                if re.search(pattern, text, re.IGNORECASE):
+                                    has_keyword = True
+                                    matched_keywords.append(kw)
+
+                            should_save = has_keyword
+
+                            if has_keyword:
+                                print(f"   🎯 發現關鍵字貼文: @{post.get('username')} (匹配: {', '.join(matched_keywords)})")
+                            else:
+                                skipped_count += 1
+
+                        # 只保存符合條件的貼文
+                        if should_save:
+                            success, is_new = self.db.save_post(post)
+                            if success and is_new:
+                                new_explore_count += 1
 
                             # 如果貼文互動數高，嘗試從中發現用戶
                             if self.discovery and post.get("like_count", 0) >= self.discovery.config.get("min_like_count", 100):
@@ -206,7 +233,10 @@ class ThreadsScheduler:
 
                     total_new_posts += new_explore_count
 
-                    print(f"   ✅ 探索頁面: {len(explore_posts)} 篇貼文，{new_explore_count} 篇為新貼文")
+                    if self.keywords:
+                        print(f"   ✅ 探索頁面: {len(explore_posts)} 篇貼文，{new_explore_count} 篇符合關鍵字並保存，{skipped_count} 篇已略過")
+                    else:
+                        print(f"   ✅ 探索頁面: {len(explore_posts)} 篇貼文，{new_explore_count} 篇為新貼文")
 
                     # 記錄日誌
                     self.db.log_tracking(
@@ -253,16 +283,43 @@ class ThreadsScheduler:
                 if data.get("profile"):
                     self.db.save_user(data["profile"])
 
-                # 儲存貼文
+                # 儲存貼文（只保存符合關鍵字的）
                 threads = data.get("threads", [])[:max_posts]
                 new_count = 0
+                skipped_count = 0
 
                 for thread in threads:
-                    success, is_new = self.db.save_post(thread)
-                    if success and is_new:
-                        new_count += 1
+                    # 檢查是否符合關鍵字（使用全詞匹配）
+                    should_save = True
+                    if self.keywords:
+                        text = thread.get("text") or ""
+                        has_keyword = False
+
+                        for kw in self.keywords:
+                            # 使用全詞匹配（\b 表示詞邊界）
+                            pattern = r'\b' + re.escape(kw) + r'\b'
+                            if re.search(pattern, text, re.IGNORECASE):
+                                has_keyword = True
+                                break
+
+                        should_save = has_keyword
+
+                        if not has_keyword:
+                            skipped_count += 1
+
+                    # 只保存符合條件的貼文
+                    if should_save:
+                        success, is_new = self.db.save_post(thread)
+                        if success and is_new:
+                            new_count += 1
 
                 total_new_posts += new_count
+
+                # 顯示結果
+                if self.keywords and skipped_count > 0:
+                    print(f"   ✅ {len(threads)} 篇貼文，{new_count} 篇符合關鍵字並保存，{skipped_count} 篇已略過")
+                else:
+                    print(f"   ✅ {len(threads)} 篇貼文，{new_count} 篇為新貼文")
 
                 # 記錄日誌
                 self.db.log_tracking(
@@ -283,13 +340,71 @@ class ThreadsScheduler:
                 print(f"   ❌ 抓取失敗: {e}")
                 self.db.log_tracking("user", username, 0, 0, f"error: {e}")
 
-        # 4. 自動發現新用戶
+        # 4. 搜尋關鍵字
+        if self.keywords:
+            print(f"\n🔍 開始搜尋關鍵字（共 {len(self.keywords)} 個）...\n")
+
+            for keyword in self.keywords:
+                # 檢查請求頻率限制
+                if not self._check_rate_limit():
+                    print("   ⏸️  暫停搜尋以遵守頻率限制")
+                    break
+
+                print(f"🔎 搜尋關鍵字: {keyword}")
+
+                # 使用帶重試的抓取
+                headless = self.advanced.get("headless", True)
+                max_scrolls = self.explore_config.get("max_scrolls", 3)
+
+                search_data = self._scrape_with_retry(
+                    scrape_search,
+                    keyword,
+                    headless=headless,
+                    max_scrolls=max_scrolls
+                )
+
+                if not search_data:
+                    self.db.log_tracking("keyword", keyword, 0, 0, "error: max retries")
+                    continue
+
+                try:
+                    # 儲存搜尋結果
+                    posts = search_data.get("posts", [])
+                    new_count = 0
+
+                    for post in posts:
+                        success, is_new = self.db.save_post(post)
+                        if success and is_new:
+                            new_count += 1
+
+                        # 如果貼文互動數高，嘗試從中發現用戶
+                        if self.discovery and post.get("like_count", 0) >= self.discovery.config.get("min_like_count", 100):
+                            self.discovery.discover_from_post(post)
+
+                    total_new_posts += new_count
+
+                    print(f"   ✅ 找到 {len(posts)} 篇貼文，{new_count} 篇為新貼文")
+
+                    # 記錄日誌
+                    self.db.log_tracking(
+                        "keyword", keyword,
+                        len(posts), new_count, "success"
+                    )
+
+                    # 智能延遲
+                    self._smart_delay()
+
+                except Exception as e:
+                    print(f"   ❌ 搜尋失敗: {e}")
+                    self.db.log_tracking("keyword", keyword, 0, 0, f"error: {e}")
+
+        # 5. 自動發現新用戶
         if self.discovery and total_new_posts > 0:
             new_discovered = self.discovery.discover_from_database()
             if new_discovered:
                 print(f"\n🎉 自動發現了 {len(new_discovered)} 個新用戶！")
 
-        # 5. 抓取追蹤貼文的回覆
+        # 6. 抓取追蹤貼文的回覆
         for thread_config in self.threads:
             # 檢查請求頻率限制
             if not self._check_rate_limit():
@@ -346,12 +461,12 @@ class ThreadsScheduler:
                 print(f"   ❌ 抓取失敗: {e}")
                 self.db.log_tracking("post", thread_url, 0, 0, f"error: {e}")
 
-        # 6. 清理不活躍用戶
+        # 7. 清理不活躍用戶
         if self.discovery:
             cleanup_days = self.discovery.config.get("cleanup_inactive_days", 60)
             self.discovery.cleanup_inactive_users(days=cleanup_days)
 
-        # 7. 發送通知
+        # 8. 發送通知
         if self.notifier and (total_new_posts > 0 or total_new_replies > 0):
             print(f"\n📢 發送通知...")
 
@@ -373,7 +488,7 @@ class ThreadsScheduler:
                     self.db.mark_as_notified(reply_ids, is_reply=True)
                     print(f"   ✅ 已通知 {len(unnotified_replies)} 則新回覆")
 
-        # 7. 顯示統計資訊
+        # 9. 顯示統計資訊
         stats = self.db.get_stats()
         print(f"\n📊 資料庫統計:")
         print(f"   總用戶數: {stats['total_users']}")

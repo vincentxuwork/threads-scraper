@@ -238,6 +238,101 @@ def scrape_explore(headless: bool = True, max_scrolls: int = 3) -> dict:
         }
 
 
+def scrape_search(keyword: str, headless: bool = True, max_scrolls: int = 3) -> dict:
+    """
+    搜尋 Threads 關鍵字並抓取搜尋結果
+
+    Args:
+        keyword: 搜尋關鍵字
+        headless: 是否使用無頭模式
+        max_scrolls: 最多向下滾動幾次（每次約 10-15 篇貼文）
+
+    Returns:
+        包含搜尋結果貼文列表的字典
+    """
+    import urllib.parse
+
+    encoded_keyword = urllib.parse.quote(keyword)
+    search_url = f"https://www.threads.net/search?q={encoded_keyword}&serp_type=default"
+
+    print(f"🔍 正在搜尋關鍵字: {keyword}")
+    print(f"   URL: {search_url}")
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=headless)
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        )
+        page = context.new_page()
+
+        try:
+            # 前往搜尋頁面
+            page.goto(search_url, wait_until="networkidle", timeout=30000)
+            page.wait_for_selector(
+                "[data-pressable-container=true]", timeout=15000
+            )
+
+            # 向下滾動以載入更多搜尋結果
+            for i in range(max_scrolls):
+                print(f"   📜 滾動第 {i + 1}/{max_scrolls} 次...")
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(2)  # 等待載入
+
+        except Exception as e:
+            print(f"⚠️  頁面載入超時，嘗試繼續解析... ({e})")
+
+        selector = Selector(page.content())
+        hidden_datasets = selector.css(
+            'script[type="application/json"][data-sjs]::text'
+        ).getall()
+
+        threads_list = []
+        seen_ids = set()
+
+        for hidden_dataset in hidden_datasets:
+            if '"ScheduledServerJS"' not in hidden_dataset:
+                continue
+
+            if "thread_items" not in hidden_dataset:
+                continue
+
+            data = json.loads(hidden_dataset)
+
+            # 嘗試解析貼文
+            thread_items = nested_lookup("thread_items", data)
+            for thread in thread_items:
+                for t in thread:
+                    try:
+                        parsed = parse_thread(t)
+                        if parsed.get("text") and parsed.get("id") not in seen_ids:
+                            threads_list.append(parsed)
+                            seen_ids.add(parsed.get("id"))
+                    except Exception:
+                        continue
+
+        browser.close()
+
+        if not threads_list:
+            print(f"⚠️  未找到關鍵字 '{keyword}' 的搜尋結果")
+            return {
+                "keyword": keyword,
+                "posts": [],
+                "total": 0
+            }
+
+        print(f"✅ 成功搜尋關鍵字 '{keyword}'，共 {len(threads_list)} 篇貼文")
+        return {
+            "keyword": keyword,
+            "posts": threads_list,
+            "total": len(threads_list)
+        }
+
+
 def scrape_profile(url: str, headless: bool = True) -> dict:
     """
     抓取 Threads 用戶的個人資料和貼文

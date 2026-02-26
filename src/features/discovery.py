@@ -3,7 +3,7 @@
 """
 
 from typing import Dict, List
-from database import ThreadsDatabase
+from src.core.database import ThreadsDatabase
 
 
 class UserDiscovery:

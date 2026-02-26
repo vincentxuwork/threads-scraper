@@ -27,46 +27,24 @@ playwright install chromium
 
 ## 使用方式
 
-### 抓取單篇貼文
+### 基本抓取功能
 
-```bash
-# 使用 uv
-uv run python threads_scraper.py post https://www.threads.net/t/XXXXX
-
-# 或直接使用 python（需先啟動虛擬環境）
-python threads_scraper.py post https://www.threads.net/t/XXXXX
-```
-
-### 抓取用戶頁面（個人資料 + 貼文列表）
-
-```bash
-# 使用 uv
-uv run python threads_scraper.py profile https://www.threads.net/@username
-
-# 或直接使用 python（需先啟動虛擬環境）
-python threads_scraper.py profile https://www.threads.net/@username
-```
-
-### 選項
-
-| 參數 | 說明 |
-|------|------|
-| `--show` | 顯示瀏覽器視窗（除錯用） |
-| `--output filename.json` | 指定輸出檔名 |
-
-### 在 Python 中直接呼叫
+#### 在 Python 中直接呼叫
 
 ```python
-from threads_scraper import scrape_thread, scrape_profile
+from src.core.scraper import ThreadsScraper
+
+# 建立爬蟲實例
+scraper = ThreadsScraper(headless=True)
 
 # 抓取單篇貼文
-data = scrape_thread("https://www.threads.net/t/XXXXX")
+data = scraper.scrape_thread("https://www.threads.net/t/XXXXX")
 print(data["thread"]["text"])       # 貼文內容
 print(data["thread"]["like_count"]) # 按讚數
 print(data["replies"])              # 回覆列表
 
 # 抓取用戶頁面
-data = scrape_profile("https://www.threads.net/@username")
+data = scraper.scrape_profile("https://www.threads.net/@username", max_posts=10)
 print(data["profile"]["full_name"]) # 用戶名稱
 print(data["profile"]["followers"]) # 追蹤者數
 for t in data["threads"]:
@@ -79,7 +57,7 @@ for t in data["threads"]:
 
 ### 設定檔
 
-編輯 `config.yaml` 來設定要追蹤的目標：
+編輯 `config/config.yaml` 來設定要追蹤的目標：
 
 ```yaml
 # 追蹤特定用戶
@@ -117,21 +95,36 @@ notifications:
       name: "Threads 通知"
 ```
 
-### 排程指令
+### 啟動服務
 
 ```bash
-# 立即執行一次抓取（測試用）
-uv run python scheduler.py run
-
 # 啟動排程器（持續運行，每天自動執行）
-uv run python scheduler.py start
+python run_scheduler.py start
 
-# 測試 Webhook 連線
-uv run python scheduler.py test
+# 或使用 uv
+uv run python run_scheduler.py start
 
-# 查看資料庫統計
-uv run python scheduler.py stats
+# 其他排程器指令
+python run_scheduler.py run    # 立即執行一次（測試用）
+python run_scheduler.py test   # 測試 Webhook 連線
+python run_scheduler.py stats  # 查看資料庫統計
+
+# 啟動 API 服務（查看抓取的資料）
+python run_api.py
+
+# API 文檔將在 http://localhost:8000/docs 提供
 ```
+
+### FastAPI 查詢介面
+
+專案包含完整的 REST API，可以查詢抓取的資料：
+
+- 📊 **統計資訊**: `/api/stats` - 查看整體統計
+- 📝 **貼文查詢**: `/api/posts` - 分頁、搜尋、過濾貼文
+- 👤 **用戶資訊**: `/api/users` - 查看用戶及追蹤列表
+- 📖 **API 文檔**: `/docs` - 完整的 Swagger UI
+
+啟動 API 服務後，開啟瀏覽器訪問 http://localhost:8000/docs
 
 ### 功能特色
 
@@ -148,7 +141,7 @@ uv run python scheduler.py stats
 **Discord:**
 1. 在 Discord 頻道設定中建立 Webhook
 2. 複製 Webhook URL
-3. 在 `config.yaml` 中加入：
+3. 在 `config/config.yaml` 中加入：
 
 ```yaml
 webhooks:
@@ -160,7 +153,7 @@ webhooks:
 **Slack:**
 1. 建立 Slack App 並啟用 Incoming Webhooks
 2. 複製 Webhook URL
-3. 在 `config.yaml` 中加入：
+3. 在 `config/config.yaml` 中加入：
 
 ```yaml
 webhooks:
@@ -173,7 +166,7 @@ webhooks:
 1. 在 Telegram 搜尋 `@BotFather` 並建立新 Bot，取得 Bot Token
 2. 將 Bot 加入你的頻道或群組
 3. 取得 Chat ID（可用 `@userinfobot` 或 `@getidsbot` 查詢）
-4. 在 `config.yaml` 中加入：
+4. 在 `config/config.yaml` 中加入：
 
 ```yaml
 webhooks:
@@ -187,7 +180,7 @@ webhooks:
 1. 前往 [LINE Notify](https://notify-bot.line.me/) 登入
 2. 點擊「發行權杖」，選擇要接收通知的聊天室
 3. 複製產生的 Access Token
-4. 在 `config.yaml` 中加入：
+4. 在 `config/config.yaml` 中加入：
 
 ```yaml
 webhooks:
@@ -198,22 +191,36 @@ webhooks:
 
 ### 資料庫結構
 
-資料儲存在 `threads_data.db`（SQLite），包含以下資料表：
+**支援兩種資料庫：**
 
-- `users` - 用戶資料
-- `posts` - 貼文資料
-- `replies` - 回覆資料
-- `tracking_log` - 追蹤記錄
-
-可使用 SQLite 工具或 Python 直接查詢：
+#### SQLite（開發/本地使用）
+資料儲存在 `threads_data.db`，適合本地測試：
 
 ```python
-from database import ThreadsDatabase
+from src.core.database_sqlite import ThreadsDatabase
 
+db = ThreadsDatabase("threads_data.db")
+stats = db.get_stats()
+print(stats)
+```
+
+#### PostgreSQL（生產環境推薦）
+使用環境變數 `DATABASE_URL` 設定：
+
+```python
+from src.core.database import ThreadsDatabase
+
+# 會自動從 DATABASE_URL 讀取連線資訊
 db = ThreadsDatabase()
 stats = db.get_stats()
 print(stats)
 ```
+
+**資料表結構：**
+- `users` - 用戶資料
+- `posts` - 貼文資料
+- `replies` - 回覆資料
+- `tracking_log` - 追蹤記錄
 
 ## 自動發現優質發文者 🔍
 
@@ -229,7 +236,7 @@ print(stats)
 
 ### 設定門檻
 
-在 `config.yaml` 中調整發現條件：
+在 `config/config.yaml` 中調整發現條件：
 
 ```yaml
 discovery:
@@ -245,7 +252,7 @@ discovery:
 ### 手動管理追蹤用戶
 
 ```python
-from database import ThreadsDatabase
+from src.core.database import ThreadsDatabase
 
 db = ThreadsDatabase()
 
@@ -264,7 +271,10 @@ db.remove_tracked_user("username", permanent=False)
 ### 查看發現報告
 
 ```bash
-uv run python scheduler.py stats
+python run_scheduler.py stats
+
+# 或使用 uv
+uv run python run_scheduler.py stats
 ```
 
 會顯示：
@@ -335,7 +345,7 @@ uv run python scheduler.py stats
 
 ### ⚙️ 調整防護設定
 
-在 `config.yaml` 中調整：
+在 `config/config.yaml` 中調整：
 
 ```yaml
 advanced:
@@ -368,9 +378,138 @@ advanced:
 - ⚠️ 不要在短時間內手動執行多次
 - ⚠️ 避免追蹤過多用戶導致請求過多
 
+## Docker 部署 🐳
+
+### 快速開始（推薦）
+
+使用 Docker Compose 一鍵部署完整服務（PostgreSQL + Scheduler + API）：
+
+```bash
+# 1. 複製環境變數範本
+cp .env.example .env
+
+# 2. 編輯 .env 設定你的參數（資料庫密碼、Webhook 等）
+nano .env
+
+# 3. 啟動所有服務
+docker-compose up -d
+
+# 4. 查看日誌
+docker-compose logs -f scheduler
+docker-compose logs -f api
+```
+
+服務啟動後：
+- 📊 API 服務：http://localhost:8000
+- 📖 API 文檔：http://localhost:8000/docs
+- 🗄️ PostgreSQL：localhost:5432
+
+### 管理指令
+
+```bash
+# 重啟服務
+docker-compose restart scheduler
+
+# 立即執行一次抓取
+docker-compose exec scheduler python run_scheduler.py run
+
+# 查看統計
+docker-compose exec scheduler python run_scheduler.py stats
+
+# 停止服務
+docker-compose down
+
+# 停止並刪除資料
+docker-compose down -v
+```
+
+**詳細說明請參考：**
+- Docker 部署指南：[docker/README.md](docker/README.md)
+- Zeabur 雲端部署：[docs/DEPLOY.md](docs/DEPLOY.md)
+
+## 專案結構 📁
+
+```
+threads-scraper/
+├── src/                      # 主程式碼
+│   ├── core/                # 核心模組
+│   │   ├── scraper.py       # Threads 爬蟲邏輯
+│   │   ├── database.py      # PostgreSQL 資料庫
+│   │   ├── database_sqlite.py # SQLite 資料庫
+│   │   └── config_loader.py # 配置載入器
+│   ├── features/            # 功能模組
+│   │   ├── scheduler.py     # 排程器
+│   │   ├── discovery.py     # 用戶發現
+│   │   └── notifier.py      # Webhook 通知
+│   └── api/                 # REST API
+│       ├── app.py           # FastAPI 應用
+│       └── routes/          # API 路由
+│           ├── posts.py     # 貼文查詢
+│           ├── users.py     # 用戶查詢
+│           └── stats.py     # 統計資訊
+├── config/                  # 配置檔案
+│   └── config.yaml          # 主配置檔
+├── docker/                  # Docker 相關
+│   ├── Dockerfile           # Docker 映像
+│   └── README.md            # Docker 使用說明
+├── docs/                    # 文檔
+│   ├── DEPLOY.md            # 部署指南
+│   └── EXPLORE.md           # 探索功能說明
+├── run_api.py               # API 服務啟動腳本
+├── run_scheduler.py         # 排程器啟動腳本
+├── docker-compose.yml       # Docker Compose 配置
+├── .env.example             # 環境變數範本
+└── README.md                # 本文件
+```
+
+## 環境變數配置 ⚙️
+
+專案支援使用環境變數覆蓋 `config/config.yaml` 的設定。
+
+複製 `.env.example` 為 `.env` 並編輯：
+
+```bash
+cp .env.example .env
+```
+
+**主要環境變數：**
+
+```bash
+# 資料庫（PostgreSQL）
+DATABASE_URL=postgresql://user:pass@host:5432/dbname
+
+# 追蹤設定
+TRACKED_USERS=user1,user2,user3
+KEYWORDS=AI,程式設計,科技
+
+# 探索模式
+EXPLORE_ENABLED=true
+EXPLORE_MAX_SCROLLS=3
+
+# 自動發現
+DISCOVERY_ENABLED=true
+DISCOVERY_MIN_LIKE_COUNT=100
+
+# Webhook 通知
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
+TELEGRAM_CHAT_ID=YOUR_CHAT_ID
+LINE_NOTIFY_TOKEN=YOUR_LINE_TOKEN
+```
+
+完整列表請參考 [.env.example](.env.example)。
+
 ## 注意事項
 
 - 只能抓取**公開**的貼文和個人資料
 - Threads 頁面結構可能隨時變動，如果爬蟲失敗，可能需要更新解析邏輯
 - 請合理控制抓取頻率，避免對伺服器造成負擔
 - 本工具僅供學習和研究用途
+
+## 相關連結 🔗
+
+- 📖 [Docker 部署指南](docker/README.md)
+- 🚀 [Zeabur 雲端部署](docs/DEPLOY.md)
+- 🔍 [探索功能說明](docs/EXPLORE.md)
+- 💡 [建議追蹤帳號](docs/SUGGESTED_ACCOUNTS.md)
