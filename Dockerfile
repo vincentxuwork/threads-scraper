@@ -35,10 +35,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # 複製專案檔案
 COPY pyproject.toml ./
-COPY requirements.txt ./
 
-# 安裝 Python 依賴
-RUN uv pip install --system -r requirements.txt
+# 安裝 Python 依賴(使用 pyproject.toml)
+RUN uv pip install --system -e .
 
 # 安裝 Playwright 瀏覽器
 RUN playwright install chromium
